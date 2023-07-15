@@ -2,9 +2,9 @@ package v1
 
 import (
 	"encoding/json"
-	file_server2 "github.com/PavelKhripkov/object_storage/internal/domain/model/file_server"
-	"github.com/PavelKhripkov/object_storage/internal/domain/service/file_server"
-	"github.com/PavelKhripkov/object_storage/internal/domain/usecase/file_server"
+	file_server2 "github.com/PavelKhripkov/object_storage/internal/domain/model/file_server_model"
+	"github.com/PavelKhripkov/object_storage/internal/domain/service/file_server_service"
+	"github.com/PavelKhripkov/object_storage/internal/domain/usecase/file_server_usecase"
 	"github.com/julienschmidt/httprouter"
 	log "github.com/sirupsen/logrus"
 	"io"
@@ -30,7 +30,11 @@ func (s fileServerHandler) Register(router *httprouter.Router) {
 
 func (s fileServerHandler) Add(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			s.l.Error(err)
+		}
+	}()
 
 	var (
 		err error
@@ -39,7 +43,7 @@ func (s fileServerHandler) Add(w http.ResponseWriter, r *http.Request, params ht
 
 	switch params.ByName("type") {
 	case "ssh":
-		var dto file_server.AddSSHFileServerDTO
+		var dto file_server_service.AddSSHFileServerDTO
 		err = decoder.Decode(&dto)
 		if err != nil {
 			s.l.Error(err)
@@ -48,7 +52,7 @@ func (s fileServerHandler) Add(w http.ResponseWriter, r *http.Request, params ht
 		}
 		res, err = s.FileServerUsecase.Add(r.Context(), dto)
 	case "api":
-		var dto file_server.AddAPIFileServerDTO
+		var dto file_server_service.AddAPIFileServerDTO
 		err = decoder.Decode(&dto)
 		if err != nil {
 			s.l.Error(err)

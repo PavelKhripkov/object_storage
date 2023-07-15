@@ -1,14 +1,22 @@
 package ssh
 
 import (
+	"context"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"time"
 )
 
-func NewClient(host, port, user, key string) (*sftp.Client, func() error, error) {
+func NewClient(ctx context.Context, host, port, user, key string) (*sftp.Client, func() error, error) {
 	signer, err := ssh.ParsePrivateKey([]byte(key))
 	if err != nil {
 		return nil, nil, err
+	}
+
+	var timeOut time.Duration
+
+	if deadLine, ok := ctx.Deadline(); ok {
+		timeOut = deadLine.Sub(time.Now())
 	}
 
 	config := &ssh.ClientConfig{
@@ -16,6 +24,7 @@ func NewClient(host, port, user, key string) (*sftp.Client, func() error, error)
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
+		Timeout:         timeOut,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO remove in prod
 	}
 

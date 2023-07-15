@@ -2,7 +2,7 @@ package v1
 
 import (
 	"encoding/json"
-	item_usecase "github.com/PavelKhripkov/object_storage/internal/domain/usecase/item"
+	item_usecase "github.com/PavelKhripkov/object_storage/internal/domain/usecase/item_usecase"
 	"github.com/julienschmidt/httprouter"
 	log "github.com/sirupsen/logrus"
 	"io"
@@ -15,13 +15,13 @@ const MaxFileSize = 10 * 1024 * 1024 * 1024  // 1 Gb
 const MaxMultiPartMemory = 100 * 1024 * 1024 // 100 Mb
 
 type itemHandler struct {
-	ItemUsecase *item_usecase.Usecase
+	itemUsecase *item_usecase.Usecase
 	l           *log.Entry
 }
 
 func NewItemHandler(usecase *item_usecase.Usecase, l *log.Logger) Handler {
 	return &itemHandler{
-		ItemUsecase: usecase,
+		itemUsecase: usecase,
 		l:           l.WithField("component", "ItemHandler"),
 	}
 }
@@ -33,10 +33,9 @@ func (s itemHandler) Register(router *httprouter.Router) {
 }
 
 func (s itemHandler) Get(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-	res, err := s.ItemUsecase.Get(r.Context(), params.ByName("id"))
+	res, err := s.itemUsecase.Get(r.Context(), params.ByName("id"))
 	if err != nil {
-		// TODO may face different errors
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -87,7 +86,11 @@ func (s itemHandler) Get(w http.ResponseWriter, r *http.Request, params httprout
 
 func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxFileSize)
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			s.l.Error(err)
+		}
+	}()
 
 	if err := r.ParseMultipartForm(MaxMultiPartMemory); err != nil {
 		s.l.Error(err)
@@ -101,15 +104,16 @@ func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.
 		return
 	}
 
+	containerID := r.FormValue("container_id")
+
 	dto := item_usecase.StoreItemDTO{
-		F:        fileHeader,
-		Name:     fileHeader.Filename,
-		Path:     "",
-		BucketID: "",
-		Size:     fileHeader.Size,
+		F:           fileHeader,
+		Name:        fileHeader.Filename,
+		ContainerID: containerID,
+		Size:        fileHeader.Size,
 	}
 
-	item, err := s.ItemUsecase.Store(r.Context(), dto)
+	item, err := s.itemUsecase.Store(r.Context(), dto)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -123,7 +127,7 @@ func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.
 }
 
 func (s itemHandler) Download(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-	contentMapper, origFileName, err := s.ItemUsecase.Download(r.Context(), params.ByName("id"))
+	contentMapper, origFileName, err := s.itemUsecase.Download(r.Context(), params.ByName("id"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -24,7 +24,11 @@ func (s *FileServerStorage) Add(ctx context.Context, params CommonFileServerDTO)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() {
+		if err := stmt.Close(); err != nil {
+			s.l.Error(err)
+		}
+	}()
 
 	_, err = stmt.ExecContext(ctx, params.ID, params.Name, params.Type, params.Params, params.Created.UnixMilli(), params.Modified.UnixMilli())
 	if err != nil {
@@ -39,10 +43,14 @@ func (s *FileServerStorage) Get(ctx context.Context, id string) (CommonFileServe
 	if err != nil {
 		return CommonFileServerDTO{}, err
 	}
-	defer stmt.Close()
+	defer func() {
+		if err := stmt.Close(); err != nil {
+			s.l.Error(err)
+		}
+	}()
 
-	res := CommonFileServerDTO{}
-	err = stmt.QueryRowContext(ctx, id).Scan(&res.ID, &res.Name, &res.Type, &res.Params)
+	entity := CommonFileServerDTO{}
+	err = stmt.QueryRowContext(ctx, id).Scan(&entity.ID, &entity.Name, &entity.Type, &entity.Params)
 
 	switch {
 	case err == sql.ErrNoRows:
@@ -51,7 +59,7 @@ func (s *FileServerStorage) Get(ctx context.Context, id string) (CommonFileServe
 		return CommonFileServerDTO{}, err
 	}
 
-	return res, nil
+	return entity, nil
 }
 
 func (s *FileServerStorage) ChooseOneExcluding(ctx context.Context, exclude []string) (CommonFileServerDTO, error) {
@@ -72,10 +80,14 @@ func (s *FileServerStorage) ChooseOneExcluding(ctx context.Context, exclude []st
 	if err != nil {
 		return CommonFileServerDTO{}, err
 	}
-	defer stmt.Close()
+	defer func() {
+		if err := stmt.Close(); err != nil {
+			s.l.Error(err)
+		}
+	}()
 
-	res := CommonFileServerDTO{}
-	err = stmt.QueryRowContext(ctx, params...).Scan(&res.ID, &res.Name, &res.Type, &res.Params)
+	entity := CommonFileServerDTO{}
+	err = stmt.QueryRowContext(ctx, params...).Scan(&entity.ID, &entity.Name, &entity.Type, &entity.Params)
 
 	switch {
 	case err == sql.ErrNoRows:
@@ -84,7 +96,7 @@ func (s *FileServerStorage) ChooseOneExcluding(ctx context.Context, exclude []st
 		return CommonFileServerDTO{}, err
 	}
 
-	return res, nil
+	return entity, nil
 }
 
 func (s *FileServerStorage) Count(ctx context.Context) (int, error) {
@@ -92,7 +104,11 @@ func (s *FileServerStorage) Count(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer stmt.Close()
+	defer func() {
+		if err := stmt.Close(); err != nil {
+			s.l.Error(err)
+		}
+	}()
 
 	var res int
 	err = stmt.QueryRowContext(ctx).Scan(&res)
