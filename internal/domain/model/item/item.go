@@ -1,12 +1,27 @@
 package item
 
-import "github.com/PavelKhripkov/object_storage/internal/domain/model/item_data"
+import "time"
+
+type Status string
+
+func (s Status) Pointer() *Status {
+	return &s
+}
+
+const (
+	ItemStatusOK      Status = "ok"
+	ItemStatusFail    Status = "fail"
+	ItemStatusPending Status = "pending"
+)
 
 type Item struct {
-	id       string
-	name     string
-	path     string
-	metadata map[string]string
-	bucketId string
-	data     item_data.ItemData
+	ID         string    `json:"id,omitempty"`
+	Name       string    `json:"name,omitempty"`
+	Size       int64     `json:"size,omitempty"`
+	Path       string    `json:"path,omitempty"`
+	BucketId   string    `json:"bucket_id,omitempty"`
+	ChunkCount uint8     `json:"chunk_count,omitempty"`
+	Status     Status    `json:"status,omitempty"`
+	Created    time.Time `json:"created,omitempty"`
+	Modified   time.Time `json:"modified,omitempty"`
 }
