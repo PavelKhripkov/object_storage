@@ -1,12 +1,13 @@
 package item_usecase
 
 import (
-	"github.com/PavelKhripkov/object_storage/internal/domain/service/file_server_service"
+	"mime/multipart"
 )
 
 type StoreItemDTO struct {
-	F           file_server_service.Opener
+	F           *multipart.FileHeader
 	Name        string
 	ContainerID string
 	Size        int64
+	Close       func() error
 }

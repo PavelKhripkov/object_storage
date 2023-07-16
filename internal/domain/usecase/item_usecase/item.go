@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"io"
+	"mime/multipart"
 )
 
 const defaultPartsCount = 6 // TODO better get from config
@@ -49,7 +50,7 @@ func (s *Usecase) Get(ctx context.Context, id string) (item_model.Item, error) {
 	return res, nil
 }
 
-type chunk struct {
+type chunkJob struct {
 	Position      uint8
 	Start, End    int64
 	Processed     bool
@@ -75,48 +76,68 @@ func (s *Usecase) Store(ctx context.Context, dto StoreItemDTO) (item_model.Item,
 }
 
 func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemDTO) {
-	partsCount, err := s.fileServerService.Count(ctx)
+	s.l.Infof("Storing file %s, of size %d bytes.", dto.Name, dto.Size)
+
+	if dto.Close != nil {
+		defer func() {
+			if err := dto.Close(); err != nil {
+				s.l.Error(err)
+			}
+		}()
+	}
+
+	partsCount := defaultPartsCount
+
+	fileServerCount, err := s.fileServerService.Count(ctx)
 	if err != nil {
 		// TODO handle error
 		return
 	}
 
-	if partsCount > defaultPartsCount {
-		partsCount = defaultPartsCount
+	if partsCount > fileServerCount {
+		partsCount = fileServerCount
 	}
 
-	chunkPositions := s.fileSplitService.SplitFileBySize(dto.Size, partsCount)
-	chunkPosCount := uint8(len(chunkPositions))
-	chunks := make([]chunk, chunkPosCount)
+	chunkPositions, err := s.fileSplitService.SplitFileBySize(dto.Size, partsCount)
+	if err != nil {
+		s.l.Error(err)
+		_, err = s.itemService.Update(ctx, itm, item_service.UpdateItemDTO{Status: item_model.ItemStatusFail.Pointer()})
+		if err != nil {
+			s.l.Error(err)
+		}
+		return
+	}
+
+	chunkJobs := make([]chunkJob, partsCount)
 
 	for i, c := range chunkPositions {
-		newChunk := chunk{
+		newChunkJob := chunkJob{
 			Position: uint8(i),
 			Start:    c,
 		}
 
-		if i != len(chunks)-1 {
-			newChunk.End = chunkPositions[i+1] - 1
+		if i != len(chunkJobs)-1 {
+			newChunkJob.End = chunkPositions[i+1] - 1
 		} else {
-			newChunk.End = dto.Size - 1
+			newChunkJob.End = dto.Size - 1
 		}
 
-		chunks[i] = newChunk
+		chunkJobs[i] = newChunkJob
 	}
 
-	chunkChannel := make(chan chunk, len(chunks))
-	defer close(chunkChannel)
+	jobChannel := make(chan chunkJob, len(chunkJobs))
+	defer close(jobChannel)
 
-	for _, c := range chunks {
-		chunkChannel <- c
+	for _, c := range chunkJobs {
+		jobChannel <- c
 	}
 
 	success := 0
-	usedServices := make(map[string]file_server_model.FileServer)
+	usedServices := make(map[string]bool)
 
-	for success < len(chunks) {
+	for success < len(chunkJobs) {
 		select {
-		case c := <-chunkChannel:
+		case c := <-jobChannel:
 			if !c.Processed {
 				delete(usedServices, c.FileServiceID)
 
@@ -125,11 +146,23 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 					s.l.WithError(err).Error("File server selection error.")
 				}
 
-				usedServices[fileServer.GetID()] = fileServer
-				go s.storeWorker(ctx, dto.F, c, fileServer, chunkChannel)
+				if fileServer.GetFreeSpace() < c.End-c.Start+1 {
+					s.l.Error("no free space on file servers")
+
+					_, err = s.itemService.Update(ctx, itm, item_service.UpdateItemDTO{Status: item_model.ItemStatusFail.Pointer()})
+					if err != nil {
+						s.l.Error(err)
+					}
+					return
+
+					// TODO clean up created chunks
+				}
+
+				usedServices[fileServer.GetID()] = true
+				go s.storeWorker(ctx, dto.F, c, fileServer, jobChannel)
 
 			} else {
-				createItemParams := chunk_service.CreateChunkDTO{
+				createParams := chunk_service.CreateChunkDTO{
 					ItemID:       itm.ID,
 					FileServerID: c.FileServiceID,
 					FilePath:     c.FilePath,
@@ -137,30 +170,38 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 					Size:         c.End - c.Start + 1,
 				}
 
-				_, err = s.chunkService.Create(ctx, createItemParams)
+				_, err = s.chunkService.Create(ctx, createParams)
 				if err != nil {
 					// TODO handle error
 				}
+
+				err = s.fileServerService.UpdateUsedSpace(ctx, c.FileServiceID, createParams.Size)
+				if err != nil {
+					return
+				}
+
 				success++
 			}
 		case <-ctx.Done():
-			// TODO clean up created chunks
+			s.l.Warn(ctx.Err())
+			// TODO clean up created chunkJobs
 		}
 
 	}
+	chunkPosCount := uint8(len(chunkPositions))
 
-	changeItemParams := item_service.ChangeItemDTO{
+	changeItemParams := item_service.UpdateItemDTO{
 		Status:     item_model.ItemStatusOK.Pointer(),
 		ChunkCount: &chunkPosCount,
 	}
 
 	_, err = s.itemService.Update(ctx, itm, changeItemParams)
 	if err != nil {
-		// TODO handle error
+		s.l.Error(err)
 	}
 }
 
-func (s *Usecase) storeWorker(ctx context.Context, f file_server_service.Opener, c chunk, fileService file_server_model.FileServer, queue chan<- chunk) {
+func (s *Usecase) storeWorker(ctx context.Context, f *multipart.FileHeader, c chunkJob, fileService file_server_model.FileServer, queue chan<- chunkJob) {
 	if FilePath, err := s.fileServerService.StoreChunk(ctx, fileService, f, c.Start, c.End-c.Start+1); err != nil {
 		s.l.Error(err)
 		return
@@ -174,55 +215,15 @@ func (s *Usecase) storeWorker(ctx context.Context, f file_server_service.Opener,
 	queue <- c
 }
 
-//func (s *Usecase) Download(ctx context.Context, id string) (string, string, error) {
-//	itm, err := s.itemService.Get(ctx, id)
-//	if err != nil {
-//		return "", "", err
-//	}
-//
-//	chunks, err := s.chunkService.GetItemChunks(ctx, id)
-//	if err != nil {
-//		return "", "", err
-//	}
-//
-//	if len(chunks) != int(itm.ChunkCount) {
-//		return "", "", errors.New("wrong chunk amount")
-//	}
-//
-//	localFile, err := os.CreateTemp("", "object_storage_tmp_file")
-//	if err != nil {
-//		return "", "", err
-//	}
-//	localFile.Close()
-//
-//	tempFileName := localFile.Name()
-//
-//	var nextPos int64
-//
-//	wg := sync.WaitGroup{}
-//	wg.Add(int(itm.ChunkCount))
-//
-//	for _, chnk := range chunks {
-//		pos := nextPos
-//		currChnk := chnk
-//		helper := func() {
-//			defer wg.Done()
-//			s.fileServerService.CopyChunkToLocal(ctx, currChnk, pos, tempFileName)
-//		}
-//		go helper()
-//		nextPos += chnk.Size
-//	}
-//
-//	wg.Wait()
-//
-//	return tempFileName, itm.Name, nil
-//
-//}
-
 func (s *Usecase) Download(ctx context.Context, id string) (io.ReadSeeker, string, error) {
 	itm, err := s.itemService.Get(ctx, id)
 	if err != nil {
 		return nil, "", err
+	}
+
+	// TODO item can be taken from local server until it's not transferred to remote ones.
+	if itm.Status != item_model.ItemStatusOK {
+		return nil, "", errors.Errorf("item can't be downloaded, current status: %s", itm.Status)
 	}
 
 	chunks, err := s.chunkService.GetItemChunks(ctx, id)
@@ -231,7 +232,7 @@ func (s *Usecase) Download(ctx context.Context, id string) (io.ReadSeeker, strin
 	}
 
 	if len(chunks) != int(itm.ChunkCount) {
-		return nil, "", errors.New("wrong chunk amount")
+		return nil, "", errors.New("wrong chunkJob amount")
 	}
 
 	parts := make([]*content_mapper.Part, len(chunks))

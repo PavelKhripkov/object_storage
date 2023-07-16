@@ -9,7 +9,7 @@ type CreateItemDTO struct {
 	ChunkCount  int8
 }
 
-type ChangeItemDTO struct {
+type UpdateItemDTO struct {
 	Status     *item_model.Status
 	ChunkCount *uint8
 }

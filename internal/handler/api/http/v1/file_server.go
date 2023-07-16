@@ -56,7 +56,7 @@ func (s fileServerHandler) Add(w http.ResponseWriter, r *http.Request, params ht
 		err = decoder.Decode(&dto)
 		if err != nil {
 			s.l.Error(err)
-			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		res, err = s.FileServerUsecase.Add(r.Context(), dto)
@@ -65,14 +65,14 @@ func (s fileServerHandler) Add(w http.ResponseWriter, r *http.Request, params ht
 
 	if err != nil {
 		s.l.Error(err)
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	bytes, err := json.Marshal(res)
 	if err != nil {
 		s.l.Error(err)
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

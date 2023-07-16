@@ -6,7 +6,7 @@ package file_server_usecase
 //
 //type AddSSHFileServerDTO struct {
 //	Name     string `json:"name,omitempty"`
-//	Address  string `json:"address,omitempty"`
+//	Host  string `json:"address,omitempty"`
 //	Port     string `json:"port,omitempty"`
 //	BasePath string `json:"base_path,omitempty"`
 //	User     string `json:"user,omitempty"`
@@ -20,7 +20,7 @@ package file_server_usecase
 //
 //type AddAPIFileServerDTO struct {
 //	Name       string `json:"name,omitempty"`
-//	Address    string `json:"address,omitempty"`
+//	Host    string `json:"address,omitempty"`
 //	Port       string `json:"port,omitempty"`
 //	Endpoint   string `json:"endpoint,omitempty"`
 //	APIVersion string `json:"api_version,omitempty"`

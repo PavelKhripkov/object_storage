@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const MaxFileSize = 10 * 1024 * 1024 * 1024  // 1 Gb
+const MaxFileSize = 10 * 1024 * 1024 * 1024  // 10 Gb
 const MaxMultiPartMemory = 100 * 1024 * 1024 // 100 Mb
 
 type itemHandler struct {
@@ -33,13 +33,13 @@ func (s itemHandler) Register(router *httprouter.Router) {
 }
 
 func (s itemHandler) Get(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-	res, err := s.itemUsecase.Get(r.Context(), params.ByName("id"))
+	item, err := s.itemUsecase.Get(r.Context(), params.ByName("id"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	bytes, err := json.Marshal(res)
+	bytes, err := json.Marshal(item)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -51,38 +51,6 @@ func (s itemHandler) Get(w http.ResponseWriter, r *http.Request, params httprout
 
 	return
 }
-
-//func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-//	r.Body = http.MaxBytesReader(w, r.Body, MaxFileSize)
-//	defer r.Body.Close()
-//
-//	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-//	if err != nil {
-//		s.l.Fatal(err)
-//	}
-//
-//	s.l.Info(r.Header.Get("Content-Length"))
-//
-//	if strings.HasPrefix(mediaType, "multipart/") {
-//		mr := multipart.NewReader(r.Body, params["boundary"])
-//		for {
-//			p, err := mr.NextPart()
-//			if err == io.EOF {
-//				s.l.Info("EOF")
-//				return
-//			}
-//			if err != nil {
-//				s.l.Fatal(err)
-//			}
-//			slurp, err := io.ReadAll(p)
-//			if err != nil {
-//				s.l.Fatal(err)
-//			}
-//			s.l.Info(len(slurp))
-//			//fmt.Printf("Part %q: %q\n", p.Header.Get("Foo"), slurp)
-//		}
-//	}
-//}
 
 func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxFileSize)
@@ -98,7 +66,7 @@ func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.
 		return
 	}
 
-	_, fileHeader, err := r.FormFile("item")
+	f, fileHeader, err := r.FormFile("item")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -106,11 +74,24 @@ func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.
 
 	containerID := r.FormValue("container_id")
 
+	// TODO read file directly into specified place.
+	closeFunc := func() error {
+		if err := f.Close(); err != nil {
+			return err
+		}
+		if err := r.MultipartForm.RemoveAll(); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
 	dto := item_usecase.StoreItemDTO{
 		F:           fileHeader,
 		Name:        fileHeader.Filename,
 		ContainerID: containerID,
 		Size:        fileHeader.Size,
+		Close:       closeFunc,
 	}
 
 	item, err := s.itemUsecase.Store(r.Context(), dto)
@@ -119,11 +100,17 @@ func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.
 		return
 	}
 
-	// TODO return item
-	if _, err := io.WriteString(w, item.ID); err != nil {
-		log.Println(err)
+	bytes, err := json.Marshal(item)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
+	if _, err = io.WriteString(w, string(bytes)); err != nil {
+		s.l.Error(err)
+	}
+
+	return
 }
 
 func (s itemHandler) Download(w http.ResponseWriter, r *http.Request, params httprouter.Params) {

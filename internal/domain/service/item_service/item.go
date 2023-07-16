@@ -64,7 +64,7 @@ func (s Service) List(ctx context.Context, containerID string) ([]item_model.Ite
 	return items, nil
 }
 
-func (s Service) Update(ctx context.Context, itm item_model.Item, params ChangeItemDTO) (item_model.Item, error) {
+func (s Service) Update(ctx context.Context, itm item_model.Item, params UpdateItemDTO) (item_model.Item, error) {
 	var isChanged bool
 
 	if params.Status != nil {

@@ -2,6 +2,7 @@ package file_server_service
 
 import (
 	"encoding/json"
+	"github.com/PavelKhripkov/object_storage/internal/domain/model/file_server_model"
 	"os"
 )
 
@@ -9,6 +10,7 @@ type AddFileServerDTO interface {
 	Validate() error
 	GetName() string
 	GetType() string
+	GetTotalSpace() int64
 	MarshalParams() (string, error)
 }
 
@@ -20,6 +22,7 @@ type AddAPIFileServerDTO struct {
 	APIVersion string `json:"api_version,omitempty"`
 	User       string `json:"user,omitempty"`
 	Password   string `json:"password,omitempty"`
+	TotalSpace int64  `json:"total_space,omitempty"`
 }
 
 func (s AddAPIFileServerDTO) Validate() error {
@@ -35,8 +38,12 @@ func (s AddAPIFileServerDTO) GetType() string {
 	return "api"
 }
 
+func (s AddAPIFileServerDTO) GetTotalSpace() int64 {
+	return s.TotalSpace
+}
+
 func (s AddAPIFileServerDTO) MarshalParams() (string, error) {
-	// Using copy of the object
+	// Using copy of the object, so we can change field.
 	s.Name = ""
 	res, err := json.Marshal(s)
 	if err != nil {
@@ -47,12 +54,13 @@ func (s AddAPIFileServerDTO) MarshalParams() (string, error) {
 }
 
 type AddSSHFileServerDTO struct {
-	Name     string `json:"name,omitempty"`
-	Address  string `json:"address,omitempty"`
-	Port     string `json:"port,omitempty"`
-	BasePath string `json:"base_path,omitempty"`
-	User     string `json:"user,omitempty"`
-	KeyFile  string `json:"key_file,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Address    string `json:"address,omitempty"`
+	Port       string `json:"port,omitempty"`
+	BasePath   string `json:"base_path,omitempty"`
+	User       string `json:"user,omitempty"`
+	KeyFile    string `json:"key_file,omitempty"`
+	TotalSpace int64  `json:"total_space,omitempty"`
 }
 
 func (s AddSSHFileServerDTO) Validate() error {
@@ -68,6 +76,10 @@ func (s AddSSHFileServerDTO) GetType() string {
 	return "ssh"
 }
 
+func (s AddSSHFileServerDTO) GetTotalSpace() int64 {
+	return s.TotalSpace
+}
+
 func (s AddSSHFileServerDTO) MarshalParams() (string, error) {
 	key, err := os.ReadFile(s.KeyFile)
 	if err != nil {
@@ -75,14 +87,12 @@ func (s AddSSHFileServerDTO) MarshalParams() (string, error) {
 	}
 
 	temp := struct {
-		Name     string `json:"name,omitempty"`
 		Address  string `json:"address,omitempty"`
 		Port     string `json:"port,omitempty"`
 		BasePath string `json:"base_path,omitempty"`
 		User     string `json:"user,omitempty"`
 		Key      string `json:"key,omitempty"`
 	}{
-		s.Name,
 		s.Address,
 		s.Port,
 		s.BasePath,
@@ -96,4 +106,8 @@ func (s AddSSHFileServerDTO) MarshalParams() (string, error) {
 	}
 
 	return string(res), nil
+}
+
+type UpdateFileServerDTO struct {
+	Status *file_server_model.Status
 }

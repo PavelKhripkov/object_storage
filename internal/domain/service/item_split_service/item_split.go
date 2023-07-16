@@ -1,6 +1,9 @@
 package item_split_service
 
-import log "github.com/sirupsen/logrus"
+import (
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+)
 
 type FileSplitService struct {
 	l *log.Entry
@@ -12,9 +15,13 @@ func NewFileSplitService(l *log.Logger) *FileSplitService {
 	}
 }
 
-func (s *FileSplitService) SplitFileBySize(size int64, maxParts int) []int64 {
+func (s *FileSplitService) SplitFileBySize(size int64, maxParts int) ([]int64, error) {
+	if maxParts < 1 {
+		return nil, errors.Errorf("incorrect parts number: %d", maxParts)
+	}
+
 	if size/int64(maxParts) == 0 {
-		return []int64{0}
+		return []int64{0}, nil
 	}
 
 	chunkSize := size / int64(maxParts)
@@ -26,5 +33,5 @@ func (s *FileSplitService) SplitFileBySize(size int64, maxParts int) []int64 {
 		res[i] = chunkSize * i
 	}
 
-	return res
+	return res, nil
 }

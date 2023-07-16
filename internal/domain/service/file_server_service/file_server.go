@@ -12,7 +12,7 @@ import (
 	"github.com/pkg/sftp"
 	log "github.com/sirupsen/logrus"
 	"io"
-	"os"
+	"mime/multipart"
 	"path"
 	"strconv"
 	"time"
@@ -30,7 +30,7 @@ func NewFileServerService(fileServerStorage fileServerStorage, l *log.Logger) *S
 	}
 }
 
-func (s Service) ChooseOneExcluding(ctx context.Context, exclude map[string]file_server_model.FileServer) (file_server_model.FileServer, error) {
+func (s Service) ChooseOneExcluding(ctx context.Context, exclude map[string]bool) (file_server_model.FileServer, error) {
 	i := 0
 	excludeList := make([]string, len(exclude))
 	for k := range exclude {
@@ -54,7 +54,7 @@ func (s Service) ChooseOneExcluding(ctx context.Context, exclude map[string]file
 func (s Service) Ping(ctx context.Context, fileServer file_server_model.FileServer) error {
 	switch fs := fileServer.(type) {
 	case *file_server_model.SSHFileServer:
-		_, closeFunc, err := ssh.NewClient(ctx, fs.Address, fs.Port, fs.User, fs.Key)
+		_, closeFunc, err := ssh.NewClient(ctx, fs.Host, fs.Port, fs.User, fs.Key)
 		if err != nil {
 			return err
 		}
@@ -70,9 +70,20 @@ func (s Service) Ping(ctx context.Context, fileServer file_server_model.FileServ
 }
 
 func (s Service) Add(ctx context.Context, dto AddFileServerDTO) (file_server_model.FileServer, error) {
+	now := time.Now()
+	newID, err := uuid.NewV7()
+	if err != nil {
+		return nil, err
+	}
+
 	commonServer := sqlite.CommonFileServerDTO{
-		Name: dto.GetName(),
-		Type: dto.GetType(),
+		ID:         newID.String(),
+		Name:       dto.GetName(),
+		Type:       dto.GetType(),
+		Status:     file_server_model.FileServerStatusUnknown,
+		TotalSpace: dto.GetTotalSpace(),
+		Created:    now,
+		Modified:   now,
 	}
 
 	params, err := dto.MarshalParams()
@@ -82,19 +93,7 @@ func (s Service) Add(ctx context.Context, dto AddFileServerDTO) (file_server_mod
 
 	commonServer.Params = params
 
-	newID, err := uuid.NewV7()
-	if err != nil {
-		return nil, err
-	}
-
-	commonServer.ID = newID.String()
-
-	now := time.Now()
-
-	commonServer.Created = now
-	commonServer.Modified = now
-
-	if err := s.storage.Add(ctx, commonServer); err != nil {
+	if err = s.storage.Add(ctx, commonServer); err != nil {
 		return nil, err
 	}
 
@@ -103,9 +102,35 @@ func (s Service) Add(ctx context.Context, dto AddFileServerDTO) (file_server_mod
 		return nil, err
 	}
 
+	// TODO come up with better decision.
+	resToPing, err := s.fromCommonDTO(commonServer)
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		pingCtx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
+		defer cancel()
+
+		status := file_server_model.FileServerStatusOK
+		if err := s.Ping(pingCtx, resToPing); err != nil {
+			s.l.Error(err)
+			status = file_server_model.FileServerStatusFail
+		}
+
+		err := s.UpdateStatus(pingCtx, resToPing.GetID(), status)
+		if err != nil {
+			s.l.Error(err)
+		}
+	}()
+
 	res.HideCredentials()
 
 	return res, nil
+}
+
+func (s Service) UpdateStatus(ctx context.Context, id string, status file_server_model.Status) error {
+	return s.storage.UpdateStatus(ctx, id, status)
 }
 
 func (s Service) Get(ctx context.Context, id string) (file_server_model.FileServer, error) {
@@ -137,6 +162,9 @@ func (s Service) fromCommonDTO(dto sqlite.CommonFileServerDTO) (file_server_mode
 
 		res.ID = dto.ID
 		res.Name = dto.Name
+		res.Status = dto.Status
+		res.TotalSpace = dto.TotalSpace
+		res.UsedSpace = dto.UsedSpace
 		res.Created = dto.Created
 		res.Modified = dto.Modified
 
@@ -150,6 +178,9 @@ func (s Service) fromCommonDTO(dto sqlite.CommonFileServerDTO) (file_server_mode
 
 		res.ID = dto.ID
 		res.Name = dto.Name
+		res.Status = dto.Status
+		res.TotalSpace = dto.TotalSpace
+		res.UsedSpace = dto.UsedSpace
 		res.Created = dto.Created
 		res.Modified = dto.Modified
 
@@ -159,7 +190,20 @@ func (s Service) fromCommonDTO(dto sqlite.CommonFileServerDTO) (file_server_mode
 	}
 }
 
-func (s Service) StoreChunk(ctx context.Context, fileServer file_server_model.FileServer, file Opener, start, size int64) (string, error) {
+func (s Service) Count(ctx context.Context) (int, error) {
+	res, err := s.storage.Count(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return res, nil
+}
+
+func (s Service) UpdateUsedSpace(ctx context.Context, id string, change int64) error {
+	return s.storage.UpdateUsedSpace(ctx, id, change)
+}
+
+func (s Service) StoreChunk(ctx context.Context, fileServer file_server_model.FileServer, file *multipart.FileHeader, start, size int64) (string, error) {
 	var (
 		res string
 		err error
@@ -181,21 +225,16 @@ func (s Service) StoreChunk(ctx context.Context, fileServer file_server_model.Fi
 	return res, nil
 }
 
-func (s Service) Count(ctx context.Context) (int, error) {
-	res, err := s.storage.Count(ctx)
-	if err != nil {
-		return 0, err
-	}
-
-	return res, nil
-}
-
-func (s Service) storeOnSSH(ctx context.Context, fs *file_server_model.SSHFileServer, file Opener, start, size int64) (string, error) {
-	client, closeFunc, err := ssh.NewClient(ctx, fs.Address, fs.Port, fs.User, fs.Key)
+func (s Service) storeOnSSH(ctx context.Context, fs *file_server_model.SSHFileServer, file *multipart.FileHeader, start, size int64) (string, error) {
+	client, closeFunc, err := ssh.NewClient(ctx, fs.Host, fs.Port, fs.User, fs.Key)
 	if err != nil {
 		return "", err
 	}
-	defer closeFunc()
+	defer func() {
+		if err := closeFunc(); err != nil {
+			s.l.Error(err)
+		}
+	}()
 
 	dir := buildFilePath()
 
@@ -217,12 +256,23 @@ func (s Service) storeOnSSH(ctx context.Context, fs *file_server_model.SSHFileSe
 	if err != nil {
 		return "", err
 	}
-	defer dstFile.Close()
+	defer func() {
+		if err := dstFile.Close(); err != nil {
+			s.l.Error(err)
+		}
+	}()
 
 	f, err := file.Open()
 	if err != nil {
 		return "", err
 	}
+
+	defer func() {
+		if err := f.Close(); err != nil {
+			s.l.Error(err)
+		}
+	}()
+
 	_, err = f.Seek(start, io.SeekStart)
 	if err != nil {
 		return "", err
@@ -236,7 +286,7 @@ func (s Service) storeOnSSH(ctx context.Context, fs *file_server_model.SSHFileSe
 	return relativePath, nil
 }
 
-func (s Service) storeOnAPI(ctx context.Context, fs *file_server_model.APIFileServer, file Opener, start, size int64) (string, error) {
+func (s Service) storeOnAPI(ctx context.Context, fs *file_server_model.APIFileServer, file *multipart.FileHeader, start, size int64) (string, error) {
 	return "", nil
 }
 
@@ -251,75 +301,6 @@ func buildFilePath() string {
 	}
 
 	return path.Join(strTemp...)
-}
-
-func (s Service) CopyChunkToLocal(ctx context.Context, chnk chunk_model.Chunk, writePos int64, localFileName string) error {
-	commonFileServer, err := s.storage.Get(ctx, chnk.FileServerID)
-	if err != nil {
-		return err
-	}
-
-	fileServer, err := s.fromCommonDTO(commonFileServer)
-	if err != nil {
-		return err
-	}
-
-	switch fs := fileServer.(type) {
-	case *file_server_model.SSHFileServer:
-		err = s.copyFromSSH(ctx, fs, chnk, writePos, localFileName)
-	case *file_server_model.APIFileServer:
-		err = s.copyFromAPI(ctx, fs, chnk, writePos, localFileName)
-	default:
-		return errors.New("unknown file server type")
-	}
-
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s Service) copyFromSSH(ctx context.Context, fileServer *file_server_model.SSHFileServer, chnk chunk_model.Chunk, writePos int64, localFileName string) error {
-	client, closeFunc, err := ssh.NewClient(ctx, fileServer.Address, fileServer.Port, fileServer.User, fileServer.Key)
-	if err != nil {
-		return err
-	}
-	defer closeFunc()
-
-	remoteFile, err := client.Open(path.Join(fileServer.BasePath, chnk.FilePath))
-	if err != nil {
-		return err
-	}
-	defer remoteFile.Close()
-
-	localFile, err := os.OpenFile(localFileName, os.O_WRONLY, 0755)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err = localFile.Close()
-		if err != nil {
-			s.l.Error(err)
-			return
-		}
-	}()
-
-	_, err = localFile.Seek(writePos, io.SeekStart)
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(localFile, remoteFile)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s Service) copyFromAPI(ctx context.Context, fileServer *file_server_model.APIFileServer, chnk chunk_model.Chunk, writePos int64, localFileName string) error {
-	return nil
 }
 
 func (s Service) OpenChunkFile(ctx context.Context, chnk chunk_model.Chunk) (func() (io.ReadSeekCloser, error), error) {
@@ -354,7 +335,7 @@ func (s Service) OpenChunkFile(ctx context.Context, chnk chunk_model.Chunk) (fun
 func (s Service) openOnSSH(ctx context.Context, fileServer *file_server_model.SSHFileServer, chnk chunk_model.Chunk) (func() (io.ReadSeekCloser, error), error) {
 
 	res := func() (io.ReadSeekCloser, error) {
-		client, closeFunc, err := ssh.NewClient(ctx, fileServer.Address, fileServer.Port, fileServer.User, fileServer.Key)
+		client, closeFunc, err := ssh.NewClient(ctx, fileServer.Host, fileServer.Port, fileServer.User, fileServer.Key)
 		if err != nil {
 			return nil, err
 		}

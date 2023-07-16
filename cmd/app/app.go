@@ -32,7 +32,11 @@ func main() {
 	if err != nil {
 		l.WithError(err).Fatal("Couldn't connect to database.")
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			l.Error(err)
+		}
+	}()
 
 	// file server
 	fileServerStorage := sqlite2.NewFileServerStorage(db, logger)
