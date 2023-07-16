@@ -6,8 +6,11 @@ import (
 	"github.com/julienschmidt/httprouter"
 	log "github.com/sirupsen/logrus"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -41,7 +44,7 @@ func (s itemHandler) Get(w http.ResponseWriter, r *http.Request, params httprout
 
 	bytes, err := json.Marshal(item)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -60,40 +63,54 @@ func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.
 		}
 	}()
 
-	if err := r.ParseMultipartForm(MaxMultiPartMemory); err != nil {
-		s.l.Error(err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	f, fileHeader, err := r.FormFile("item")
+	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if !strings.HasPrefix(mediaType, "multipart/") {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	containerID := r.FormValue("container_id")
+	mr := multipart.NewReader(r.Body, params["boundary"])
+	form, err := mr.ReadForm(MaxMultiPartMemory)
 
-	// TODO read file directly into specified place.
-	closeFunc := func() error {
-		if err := f.Close(); err != nil {
-			return err
+	cleanUpForm := func() {
+		if err := form.RemoveAll(); err != nil {
+			s.l.Error(err)
 		}
-		if err := r.MultipartForm.RemoveAll(); err != nil {
-			return err
-		}
-
-		return nil
 	}
+
+	if len(form.File) != 1 {
+		defer cleanUpForm()
+		http.Error(w, "accepting exactly one file", http.StatusBadRequest)
+		return
+	}
+
+	if len(form.File["item"]) != 1 {
+		defer cleanUpForm()
+		http.Error(w, "accepting exactly one file", http.StatusBadRequest)
+		return
+	}
+	fileHeader := form.File["item"][0]
+
+	if len(form.Value["container_id"]) != 1 {
+		defer cleanUpForm()
+		http.Error(w, "accepting exactly one 'container_id' value", http.StatusBadRequest)
+		return
+	}
+	containerID := form.Value["container_id"][0]
 
 	dto := item_usecase.StoreItemDTO{
 		F:           fileHeader,
 		Name:        fileHeader.Filename,
 		ContainerID: containerID,
 		Size:        fileHeader.Size,
-		Close:       closeFunc,
+		Close:       cleanUpForm,
 	}
-
+	
 	item, err := s.itemUsecase.Store(r.Context(), dto)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

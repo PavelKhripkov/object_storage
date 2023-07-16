@@ -9,5 +9,5 @@ type StoreItemDTO struct {
 	Name        string
 	ContainerID string
 	Size        int64
-	Close       func() error
+	Close       func()
 }

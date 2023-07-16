@@ -79,11 +79,7 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 	s.l.Infof("Storing file %s, of size %d bytes.", dto.Name, dto.Size)
 
 	if dto.Close != nil {
-		defer func() {
-			if err := dto.Close(); err != nil {
-				s.l.Error(err)
-			}
-		}()
+		defer dto.Close()
 	}
 
 	partsCount := defaultPartsCount
@@ -91,6 +87,15 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 	fileServerCount, err := s.fileServerService.Count(ctx)
 	if err != nil {
 		// TODO handle error
+		return
+	}
+
+	if fileServerCount < 1 {
+		s.l.Error("No available file servers found.")
+		_, err := s.itemService.Update(ctx, itm, item_service.UpdateItemDTO{Status: item_model.ItemStatusFail.Pointer()})
+		if err != nil {
+			s.l.Error(err)
+		}
 		return
 	}
 
