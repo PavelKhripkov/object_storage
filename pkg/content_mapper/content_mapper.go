@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+// Part represents one part of a stream to be read.
+// TODO need constructor?
 type Part struct {
 	Start, End int64
 	Open       func() (io.ReadSeekCloser, error)
@@ -15,6 +17,8 @@ type Part struct {
 	file       io.ReadSeeker
 }
 
+// ContentMapper maps reading of a single source into multiple parts.
+// Handles Open, Close, Seek, Read methods of Parts.
 type ContentMapper struct {
 	io.ReadSeeker
 	parts      []*Part
@@ -26,9 +30,10 @@ type ContentMapper struct {
 	offset int64
 }
 
-func NewContentMapper(l *logrus.Logger, parts []*Part, size int64) (*ContentMapper, error) {
+// NewContentMapper create new content mapper with provided parts.
+func NewContentMapper(l *logrus.Entry, parts []*Part, size int64) (*ContentMapper, error) {
 	res := &ContentMapper{
-		l:     l.WithField("component", "ContentMapper"),
+		l:     l,
 		parts: parts,
 		size:  size,
 	}

@@ -17,6 +17,7 @@ import (
 
 const defaultPartsCount = 6 // TODO better get from config
 
+// Usecase represents item use cases.
 type Usecase struct {
 	itemService       *item_service.Service
 	chunkService      *chunk_service.Service
@@ -26,6 +27,7 @@ type Usecase struct {
 	l *log.Entry
 }
 
+// NewItemUsecase creates new item use cases service.
 func NewItemUsecase(
 	itemService *item_service.Service,
 	chunkService *chunk_service.Service,
@@ -41,6 +43,7 @@ func NewItemUsecase(
 	}
 }
 
+// Get returns item model.
 func (s *Usecase) Get(ctx context.Context, id string) (item_model.Item, error) {
 	res, err := s.itemService.Get(ctx, id)
 	if err != nil {
@@ -58,6 +61,7 @@ type chunkJob struct {
 	FilePath      string
 }
 
+// Store creates item model and starts storing item chunks on file servers.
 func (s *Usecase) Store(ctx context.Context, dto StoreItemDTO) (item_model.Item, error) {
 	params := item_service.CreateItemDTO{
 		Name:        dto.Name,
@@ -75,6 +79,10 @@ func (s *Usecase) Store(ctx context.Context, dto StoreItemDTO) (item_model.Item,
 	return newItem, nil
 }
 
+// store runs in background and performs:
+// 1. item splitting into chunks;
+// 2. getting available file servers;
+// 3. storing item chunks on file servers.
 func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemDTO) {
 	s.l.Infof("Storing file %s, of size %d bytes.", dto.Name, dto.Size)
 
@@ -99,10 +107,12 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 		return
 	}
 
+	// If there are too few available file servers, we're reducing target chunk amount.
 	if partsCount > fileServerCount {
 		partsCount = fileServerCount
 	}
 
+	// Split item into chunks.
 	chunkPositions, err := s.fileSplitService.SplitFileBySize(dto.Size, partsCount)
 	if err != nil {
 		s.l.Error(err)
@@ -115,6 +125,7 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 
 	chunkJobs := make([]chunkJob, partsCount)
 
+	// Create chunk jobs.
 	for i, c := range chunkPositions {
 		newChunkJob := chunkJob{
 			Position: uint8(i),
@@ -133,6 +144,7 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 	jobChannel := make(chan chunkJob, len(chunkJobs))
 	defer close(jobChannel)
 
+	// Since jobs are small, we can store all of them in a buffered channel.
 	for _, c := range chunkJobs {
 		jobChannel <- c
 	}
@@ -140,9 +152,11 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 	success := 0
 	usedServices := make(map[string]bool)
 
+	// Reading from job channel until either all chunks are stored successfully or unrecoverable error encountered.
 	for success < len(chunkJobs) {
 		select {
 		case c := <-jobChannel:
+			// New job or the one that couldn't be stored on a file server.
 			if !c.Processed {
 				delete(usedServices, c.FileServiceID)
 
@@ -166,6 +180,7 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 				usedServices[fileServer.GetID()] = true
 				go s.storeWorker(ctx, dto.F, c, fileServer, jobChannel)
 
+				// The one successfully stored.
 			} else {
 				createParams := chunk_service.CreateChunkDTO{
 					ItemID:       itm.ID,
@@ -195,6 +210,7 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 	}
 	chunkPosCount := uint8(len(chunkPositions))
 
+	// Now can store chunk info into item model.
 	changeItemParams := item_service.UpdateItemDTO{
 		Status:     item_model.ItemStatusOK.Pointer(),
 		ChunkCount: &chunkPosCount,
@@ -206,6 +222,7 @@ func (s *Usecase) store(ctx context.Context, itm item_model.Item, dto StoreItemD
 	}
 }
 
+// storeWorker stores chunk on file server and replies into job queue with results.
 func (s *Usecase) storeWorker(ctx context.Context, f *multipart.FileHeader, c chunkJob, fileService file_server_model.FileServer, queue chan<- chunkJob) {
 	if FilePath, err := s.fileServerService.StoreChunk(ctx, fileService, f, c.Start, c.End-c.Start+1); err != nil {
 		s.l.Error(err)
@@ -220,6 +237,7 @@ func (s *Usecase) storeWorker(ctx context.Context, f *multipart.FileHeader, c ch
 	queue <- c
 }
 
+// Download prepares chunks, opens streams and returns io.ReadSeeker that can be used to read item seamlessly.
 func (s *Usecase) Download(ctx context.Context, id string) (io.ReadSeeker, string, error) {
 	itm, err := s.itemService.Get(ctx, id)
 	if err != nil {
@@ -243,6 +261,7 @@ func (s *Usecase) Download(ctx context.Context, id string) (io.ReadSeeker, strin
 	parts := make([]*content_mapper.Part, len(chunks))
 	var nextStart int64
 
+	// Preparing chunk files for content mapper.
 	for i, chnk := range chunks {
 		chunkFile, err := s.fileServerService.OpenChunkFile(ctx, chnk)
 		if err != nil {
@@ -257,7 +276,7 @@ func (s *Usecase) Download(ctx context.Context, id string) (io.ReadSeeker, strin
 		parts[i] = &newPart
 	}
 
-	contentMapper, err := content_mapper.NewContentMapper(s.l.Logger, parts, itm.Size)
+	contentMapper, err := content_mapper.NewContentMapper(s.l.Logger.WithField("component", "ContentMapper"), parts, itm.Size)
 	if err != nil {
 		return nil, "", err
 	}

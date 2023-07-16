@@ -7,11 +7,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Usecase represents file server use cases.
 type Usecase struct {
 	fileServerService *file_server_service.Service
 	l                 *log.Entry
 }
 
+// NewFileServerUsecase creates new file server use cases service.
 func NewFileServerUsecase(fileServerService *file_server_service.Service, l *log.Logger) *Usecase {
 	return &Usecase{
 		fileServerService: fileServerService,

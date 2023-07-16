@@ -2,6 +2,7 @@ package file_server_model
 
 import "time"
 
+// APIFileServer represents file server working via API.
 type APIFileServer struct {
 	ID         string    `json:"id,omitempty"`
 	Name       string    `json:"name,omitempty"`

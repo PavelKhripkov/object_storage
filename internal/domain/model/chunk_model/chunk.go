@@ -2,6 +2,7 @@ package chunk_model
 
 import "time"
 
+// Chunk represents item chunk stored on file server.
 type Chunk struct {
 	ID           string    `json:"id,omitempty"`
 	ItemID       string    `json:"item_id,omitempty"`

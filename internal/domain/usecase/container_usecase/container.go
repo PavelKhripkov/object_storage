@@ -7,11 +7,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Usecase represents container use cases.
 type Usecase struct {
 	containerService *container_service.Service
 	l                *log.Entry
 }
 
+// NewContainerUsecase creates new container use cases service.
 func NewContainerUsecase(containerService *container_service.Service, l *log.Logger) *Usecase {
 	return &Usecase{
 		containerService: containerService,

@@ -35,6 +35,7 @@ func (s itemHandler) Register(router *httprouter.Router) {
 	router.GET("/item/:id/download", s.Download)
 }
 
+// Get replies with a single entity of item.
 func (s itemHandler) Get(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	item, err := s.itemUsecase.Get(r.Context(), params.ByName("id"))
 	if err != nil {
@@ -55,6 +56,7 @@ func (s itemHandler) Get(w http.ResponseWriter, r *http.Request, params httprout
 	return
 }
 
+// Store parses body into form and passes incoming file to be stored into chunks on file servers.
 func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxFileSize)
 	defer func() {
@@ -110,7 +112,7 @@ func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.
 		Size:        fileHeader.Size,
 		Close:       cleanUpForm,
 	}
-	
+
 	item, err := s.itemUsecase.Store(r.Context(), dto)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -130,6 +132,8 @@ func (s itemHandler) Store(w http.ResponseWriter, r *http.Request, _ httprouter.
 	return
 }
 
+// Download replies with a stream mapped to the chunks of an item.
+// Allows to start download immediately, without waiting chunks to be taken from file servers.
 func (s itemHandler) Download(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	contentMapper, origFileName, err := s.itemUsecase.Download(r.Context(), params.ByName("id"))
 	if err != nil {

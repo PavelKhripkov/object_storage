@@ -26,8 +26,9 @@ func main() {
 	l := logger.WithField("component", "main")
 
 	l.Info("Starting app")
-	router := httprouter.New()
 
+	router := httprouter.New()
+	// TODO get from config
 	db, err := sqlite.NewClient(context.TODO(), "", "", "./object_storage.db")
 	if err != nil {
 		l.WithError(err).Fatal("Couldn't connect to database.")
@@ -66,6 +67,7 @@ func main() {
 	fileServerHandler.Register(router)
 	containerHandler.Register(router)
 
+	// TODO get from config
 	l.Info("Listening on port 11111")
 	if err := http.ListenAndServe(":11111", router); err != nil {
 		l.Fatal(err)

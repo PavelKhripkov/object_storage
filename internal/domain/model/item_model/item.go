@@ -14,6 +14,7 @@ const (
 	ItemStatusPending Status = "pending"
 )
 
+// Item represents item (currently any byte file) that can be stored and managed by the service.
 type Item struct {
 	ID          string    `json:"id,omitempty"`
 	Name        string    `json:"name,omitempty"`

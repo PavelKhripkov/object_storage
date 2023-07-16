@@ -18,11 +18,13 @@ import (
 	"time"
 )
 
+// Service provides methods to engage file servers.
 type Service struct {
 	storage fileServerStorage
 	l       *log.Entry
 }
 
+// NewFileServerService creates new file server service.
 func NewFileServerService(fileServerStorage fileServerStorage, l *log.Logger) *Service {
 	return &Service{
 		storage: fileServerStorage,
@@ -30,6 +32,7 @@ func NewFileServerService(fileServerStorage fileServerStorage, l *log.Logger) *S
 	}
 }
 
+// ChooseOneExcluding returns one file server model, excluding the ones in provided map.
 func (s Service) ChooseOneExcluding(ctx context.Context, exclude map[string]bool) (file_server_model.FileServer, error) {
 	i := 0
 	excludeList := make([]string, len(exclude))
@@ -51,6 +54,7 @@ func (s Service) ChooseOneExcluding(ctx context.Context, exclude map[string]bool
 	return res, nil
 }
 
+// Ping checks if file server available.
 func (s Service) Ping(ctx context.Context, fileServer file_server_model.FileServer) error {
 	switch fs := fileServer.(type) {
 	case *file_server_model.SSHFileServer:
@@ -69,6 +73,9 @@ func (s Service) Ping(ctx context.Context, fileServer file_server_model.FileServ
 	return nil
 }
 
+// Add creates and returns new file server model.
+// After model stored in DB, Ping is engaged to check server availability.
+// Before returning, HideCredentials method involved to not show secrets in http response.
 func (s Service) Add(ctx context.Context, dto AddFileServerDTO) (file_server_model.FileServer, error) {
 	now := time.Now()
 	newID, err := uuid.NewV7()
@@ -129,6 +136,7 @@ func (s Service) Add(ctx context.Context, dto AddFileServerDTO) (file_server_mod
 	return res, nil
 }
 
+// UpdateStatus updates file sevres status.
 func (s Service) UpdateStatus(ctx context.Context, id string, status file_server_model.Status) error {
 	return s.storage.UpdateStatus(ctx, id, status)
 }
@@ -147,6 +155,7 @@ func (s Service) Get(ctx context.Context, id string) (file_server_model.FileServ
 	return res, nil
 }
 
+// fromCommonDTO converts DTO to concrete model and returns as FileServer interface.
 func (s Service) fromCommonDTO(dto sqlite.CommonFileServerDTO) (file_server_model.FileServer, error) {
 	if err := dto.Validate(); err != nil {
 		return nil, err
@@ -190,6 +199,7 @@ func (s Service) fromCommonDTO(dto sqlite.CommonFileServerDTO) (file_server_mode
 	}
 }
 
+// Count returns number of available file servers.
 func (s Service) Count(ctx context.Context) (int, error) {
 	res, err := s.storage.Count(ctx)
 	if err != nil {
@@ -199,10 +209,12 @@ func (s Service) Count(ctx context.Context) (int, error) {
 	return res, nil
 }
 
+// UpdateUsedSpace updates file server used space by either positive or negative number. Positive means used space is increased.
 func (s Service) UpdateUsedSpace(ctx context.Context, id string, change int64) error {
 	return s.storage.UpdateUsedSpace(ctx, id, change)
 }
 
+// StoreChunk stores item chunk to specified file server.
 func (s Service) StoreChunk(ctx context.Context, fileServer file_server_model.FileServer, file *multipart.FileHeader, start, size int64) (string, error) {
 	var (
 		res string
@@ -225,6 +237,7 @@ func (s Service) StoreChunk(ctx context.Context, fileServer file_server_model.Fi
 	return res, nil
 }
 
+// storeOnSSH implements storing item chunk on a file server via SSH.
 func (s Service) storeOnSSH(ctx context.Context, fs *file_server_model.SSHFileServer, file *multipart.FileHeader, start, size int64) (string, error) {
 	client, closeFunc, err := ssh.NewClient(ctx, fs.Host, fs.Port, fs.User, fs.Key)
 	if err != nil {
@@ -286,10 +299,13 @@ func (s Service) storeOnSSH(ctx context.Context, fs *file_server_model.SSHFileSe
 	return relativePath, nil
 }
 
+// storeOnAPI implements storing item chunk on a file server via API.
 func (s Service) storeOnAPI(ctx context.Context, fs *file_server_model.APIFileServer, file *multipart.FileHeader, start, size int64) (string, error) {
+	// TODO implement.
 	return "", nil
 }
 
+// buildFilePath creates a path to store file on.
 func buildFilePath() string {
 	now := time.Now()
 
@@ -303,6 +319,7 @@ func buildFilePath() string {
 	return path.Join(strTemp...)
 }
 
+// OpenChunkFile opens remote file representing chunk to be read in stream mode. Returned object must be closed after usage.
 func (s Service) OpenChunkFile(ctx context.Context, chnk chunk_model.Chunk) (func() (io.ReadSeekCloser, error), error) {
 	commonFileServer, err := s.storage.Get(ctx, chnk.FileServerID)
 	if err != nil {
@@ -332,6 +349,7 @@ func (s Service) OpenChunkFile(ctx context.Context, chnk chunk_model.Chunk) (fun
 	return res, nil
 }
 
+// openOnSSH implements stream access to chunk file via SSH.
 func (s Service) openOnSSH(ctx context.Context, fileServer *file_server_model.SSHFileServer, chnk chunk_model.Chunk) (func() (io.ReadSeekCloser, error), error) {
 
 	res := func() (io.ReadSeekCloser, error) {
@@ -356,10 +374,12 @@ func (s Service) openOnSSH(ctx context.Context, fileServer *file_server_model.SS
 	return res, nil
 }
 
+// openOnSSH implements access to chunk file via API.
 func (s Service) openOnAPI(ctx context.Context, fileServer *file_server_model.APIFileServer, chnk chunk_model.Chunk) (func() (io.ReadSeekCloser, error), error) {
 	return nil, nil
 }
 
+// sftpWrapper wraps ssh client, sftp client and remote file to io.ReadSeekCloser.
 type sftpWrapper struct {
 	closeClient func() error
 	file        *sftp.File

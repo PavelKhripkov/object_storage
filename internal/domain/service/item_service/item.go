@@ -8,11 +8,13 @@ import (
 	"time"
 )
 
+// Service provides methods to manage items.
 type Service struct {
 	storage itemStorage
 	l       *log.Entry
 }
 
+// NewItemService creates new item service.
 func NewItemService(itemStorage itemStorage, l *log.Logger) *Service {
 	return &Service{
 		storage: itemStorage,
@@ -20,6 +22,7 @@ func NewItemService(itemStorage itemStorage, l *log.Logger) *Service {
 	}
 }
 
+// Get returns item model by ID.
 func (s Service) Get(ctx context.Context, id string) (item_model.Item, error) {
 	res, err := s.storage.Get(ctx, id)
 	if err != nil {
@@ -29,6 +32,7 @@ func (s Service) Get(ctx context.Context, id string) (item_model.Item, error) {
 	return res, nil
 }
 
+// Create creates and returns new item model.
 func (s Service) Create(ctx context.Context, dto CreateItemDTO) (item_model.Item, error) {
 	newID, err := uuid.NewV7()
 	if err != nil {
@@ -55,6 +59,7 @@ func (s Service) Create(ctx context.Context, dto CreateItemDTO) (item_model.Item
 	return newItem, nil
 }
 
+// List return all item entities.
 func (s Service) List(ctx context.Context, containerID string) ([]item_model.Item, error) {
 	items, err := s.storage.List(ctx, containerID)
 	if err != nil {
@@ -64,6 +69,7 @@ func (s Service) List(ctx context.Context, containerID string) ([]item_model.Ite
 	return items, nil
 }
 
+// Update updates specified fields of an item.
 func (s Service) Update(ctx context.Context, itm item_model.Item, params UpdateItemDTO) (item_model.Item, error) {
 	var isChanged bool
 
@@ -90,5 +96,6 @@ func (s Service) Update(ctx context.Context, itm item_model.Item, params UpdateI
 }
 
 func (s Service) Delete(ctx context.Context, id string) error {
+	// TODO implement.
 	return nil
 }

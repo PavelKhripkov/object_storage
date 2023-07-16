@@ -2,6 +2,7 @@ package file_server_model
 
 import "time"
 
+// SSHFileServer represents file server working via SSH.
 type SSHFileServer struct {
 	ID         string    `json:"id,omitempty"`
 	Name       string    `json:"name,omitempty"`

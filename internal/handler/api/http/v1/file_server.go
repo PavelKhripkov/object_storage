@@ -28,6 +28,7 @@ func (s fileServerHandler) Register(router *httprouter.Router) {
 	router.GET("/file_server/:id", s.Get)
 }
 
+// Add creates a file server.
 func (s fileServerHandler) Add(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	decoder := json.NewDecoder(r.Body)
 	defer func() {
@@ -81,6 +82,7 @@ func (s fileServerHandler) Add(w http.ResponseWriter, r *http.Request, params ht
 	}
 }
 
+// Get replies with a single entity of file server.
 func (s fileServerHandler) Get(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	res, err := s.FileServerUsecase.Get(r.Context(), params.ByName("id"))
 	if err != nil {

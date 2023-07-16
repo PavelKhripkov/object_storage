@@ -116,5 +116,6 @@ func (s ContainerStorage) Create(ctx context.Context, container container_model.
 }
 
 func (s ContainerStorage) Delete(ctx context.Context, id string) error {
+	// TODO implement.
 	return nil
 }

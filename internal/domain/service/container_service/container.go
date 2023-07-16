@@ -8,11 +8,13 @@ import (
 	"time"
 )
 
+// Service provides methods to manage containers.
 type Service struct {
 	storage containerStorage
 	l       *log.Entry
 }
 
+// NewContainerService creates new container service.
 func NewContainerService(containerStorage containerStorage, l *log.Logger) *Service {
 	return &Service{
 		storage: containerStorage,
@@ -20,6 +22,7 @@ func NewContainerService(containerStorage containerStorage, l *log.Logger) *Serv
 	}
 }
 
+// Get returns container model by ID.
 func (s Service) Get(ctx context.Context, id string) (container_model.Container, error) {
 	res, err := s.storage.Get(ctx, id)
 	if err != nil {
@@ -29,6 +32,7 @@ func (s Service) Get(ctx context.Context, id string) (container_model.Container,
 	return res, nil
 }
 
+// Create creates and returns new container model.
 func (s Service) Create(ctx context.Context, dto CreateContainerDTO) (container_model.Container, error) {
 	newID, err := uuid.NewV7()
 	if err != nil {
@@ -54,6 +58,7 @@ func (s Service) Create(ctx context.Context, dto CreateContainerDTO) (container_
 	return newContainer, nil
 }
 
+// List returns all available containers.
 func (s Service) List(ctx context.Context) ([]container_model.Container, error) {
 	containers, err := s.storage.List(ctx)
 	if err != nil {
@@ -63,6 +68,7 @@ func (s Service) List(ctx context.Context) ([]container_model.Container, error) 
 	return containers, nil
 }
 
+// Delete removes container by ID.
 func (s Service) Delete(ctx context.Context, id string) error {
 	return s.storage.Delete(ctx, id)
 }

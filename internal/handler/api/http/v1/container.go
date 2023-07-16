@@ -28,6 +28,7 @@ func (s containerHandler) Register(router *httprouter.Router) {
 	router.DELETE("/container/:id/delete", s.Delete)
 }
 
+// Get replies with a single entity of container.
 func (s containerHandler) Get(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	res, err := s.containerUsecase.Get(r.Context(), params.ByName("id"))
 	if err != nil {
@@ -48,6 +49,7 @@ func (s containerHandler) Get(w http.ResponseWriter, r *http.Request, params htt
 	return
 }
 
+// Create creates an item container.
 func (s containerHandler) Create(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	decoder := json.NewDecoder(r.Body)
 	defer func() {
@@ -84,6 +86,7 @@ func (s containerHandler) Create(w http.ResponseWriter, r *http.Request, params 
 	}
 }
 
+// List returns all containers.
 func (s containerHandler) List(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	res, err := s.containerUsecase.List(r.Context())
 
@@ -106,5 +109,5 @@ func (s containerHandler) List(w http.ResponseWriter, r *http.Request, params ht
 }
 
 func (s containerHandler) Delete(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-
+	// TODO implement.
 }
